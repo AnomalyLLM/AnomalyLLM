@@ -1,10 +1,12 @@
+import os
 import pickle
-
+import argparse
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import random
 import sys
+from codes.model.MetaLlama import DyGLlamaForCausalLM
 
 from tqdm import tqdm
 
@@ -39,11 +41,11 @@ class AnomalyLLM(BertPreTrainedModel):
         self.config = config
         self.transformer = BaseModel(config)
         self.gcn_model = GNNModel(config.hidden_size, 128, config.hidden_size)
-        self.merge_network = MergeNetwork(config.hidden_size, 4, 4096)
+        self.merge_network = MergeNetwork(config.hidden_size, 4096)
         self.criterion = ContrastiveLoss(1.0)
         self.text_model = CrossAttentionModel(embed_dim=4096, num_heads=4)
         self.w_model = TransposedLinear(in_features=677, out_features=100)
-        self.mlp = MLP(input_dim=4096, hidden_dim1=1024, hidden_dim2=512, output_dim=1)
+        self.mlp = MLP(input_dim=4096, hidden_dim1=1024, output_dim=1)
 
 
         self.weight_decay = config.weight_decay
@@ -53,7 +55,7 @@ class AnomalyLLM(BertPreTrainedModel):
         self.int_embeddings = None
         self.time_embeddings = None
 
-    def forward(self, init_pos_ids, hop_dis_ids, time_dis_ids, len_pos, state, idx=None):
+    def forward(self, llama_model, args_llama, init_pos_ids, hop_dis_ids, time_dis_ids, len_pos, state, idx=None):
 
         if len_pos == 0:
             index = self.config.k
@@ -87,7 +89,7 @@ class AnomalyLLM(BertPreTrainedModel):
             edge_representation = self.merge_network(achor_combined, positive_combined)
             if state != "pretraining":
                 normal_edge = self.merge_network(achor_combined, positive_combined)
-                with open(r'./AnomalyLLM/data/text_prototype_embeddings.pkl', 'rb') as file:
+                with open(r'./data/text_prototype_embeddings.pkl', 'rb') as file:
                     text_embeddings = pickle.load(file)
 
                 text_prototype_embeddings = self.w_model(text_embeddings)
@@ -100,8 +102,9 @@ class AnomalyLLM(BertPreTrainedModel):
                 result_list = [a + b for a, b in zip(list_of_tensors, normal_edge)]
                 nsequence_output = None
 
-                llama_normal_edge = run_llama(result_list, "few-shot", True)
-                edge_representation = torch.mean(torch.stack(llama_normal_edge), dim=1)  # 输出大小为 (2000, 4096)
+                llama_normal_edge = run_llama(llama_model, args_llama, result_list, "alignment", True)
+                llama_normal_edge = torch.cat(llama_normal_edge, dim=0)
+                edge_representation = torch.mean(llama_normal_edge, dim=1) 
 
             output = self.mlp(edge_representation)
         
@@ -153,34 +156,30 @@ class AnomalyLLM(BertPreTrainedModel):
             edge_representation = torch.cat((normal_edge, anomaly_edge), dim=0)
 
             if state != "pretraining":
-                with open(r'./AnomalyLLM/data/text_prototype_embeddings.pkl', 'rb') as file:
+                with open(r'./data/text_prototype_embeddings.pkl', 'rb') as file:
                     text_embeddings = pickle.load(file)
         
-                edge_representation = torch.stack(normal_edge).float()
+                # edge_representation = torch.stack(normal_edge).float()
                 text_prototype_embeddings = self.w_model(text_embeddings)
 
                 normal_output = self.text_model(edge_representation.unsqueeze(1), text_prototype_embeddings.unsqueeze(1), text_prototype_embeddings.unsqueeze(1))
+                # llama_normal_edge = run_llama(normal_edge, "pre-train-normal", False)
                 list_of_tensors = [t for t in normal_output]
                 result_list = [a + b for a, b in zip(list_of_tensors, normal_edge)]
-                llama_normal_edge = run_llama(result_list, "few-shot", True)
+                llama_normal_edge = run_llama(llama_model, args_llama, result_list, "few-shot", True)
 
-                llama_normal_edge = torch.stack(llama_normal_edge)
+                llama_normal_edge = torch.cat(llama_normal_edge, dim=0)
 
-                anomaly_edge = []
-                for i in anomaly_edge_1:
-                    ii = i
-                    ii = ii.repeat(8)
-                    ii = torch.stack([ii])
-                    anomaly_edge.append(ii.squeeze())
-                anomaly_edge_representation = torch.stack(anomaly_edge).float()
+
+                anomaly_edge_representation = anomaly_edge
                 anomaly_output = self.text_model(anomaly_edge_representation.unsqueeze(1), text_prototype_embeddings.unsqueeze(1), text_prototype_embeddings.unsqueeze(1))
                 # llama_normal_edge = run_llama(normal_edge, "pre-train-normal", False)
                 anomaly_list_of_tensors = [t for t in anomaly_output]
                 anomaly_result_list = [a + b for a, b in zip(anomaly_list_of_tensors, anomaly_edge)]
 
                 # llama_anomaly_edge = run_llama(anomaly_edge, "pre-train-anomalous", False)
-                llama_anomaly_edge = run_llama(anomaly_result_list, "few-shot", True)
-                llama_anomaly_edge = torch.stack(llama_anomaly_edge)
+                llama_anomaly_edge = run_llama(llama_model, args_llama, anomaly_result_list, "few-shot", True)
+                llama_anomaly_edge = torch.cat(llama_anomaly_edge, dim=0)
                 
                 edge_representation = torch.cat((llama_normal_edge, llama_anomaly_edge), dim=0)
                 edge_representation = torch.mean(edge_representation, dim=1)  # 输出大小为 (2000, 4096)
@@ -243,7 +242,7 @@ class AnomalyLLM(BertPreTrainedModel):
 
     def generate_negative_edges(self, snap_edge, num_nodes, snap_id):
         negative_edge = []
-        seen_edges = set() 
+        seen_edges = set()
         for edge in snap_edge:
             start_node, _ = edge
             end_node = random.randint(1, num_nodes - 1)  
@@ -274,7 +273,8 @@ class AnomalyLLM(BertPreTrainedModel):
         return negative_edges
 
     def pretraining(self, max_epoch):
-
+        llama_model = None
+        args_llama = None
         optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         raw_embeddings, wl_embeddings, self.hop_embeddings, self.int_embeddings, self.time_embeddings, self.batch_hop_dicts = self.generate_embedding(
             self.data['edges'])
@@ -283,7 +283,7 @@ class AnomalyLLM(BertPreTrainedModel):
         ns_function = self.negative_sampling
 
         for epoch in range(max_epoch):
-
+            
             t_epoch_begin = time.time()
             negatives = ns_function(self.data['edges'][0:max(self.data['snap_train']) + 1])
             raw_embeddings_neg, wl_embeddings_neg, hop_embeddings_neg, int_embeddings_neg, \
@@ -314,10 +314,11 @@ class AnomalyLLM(BertPreTrainedModel):
                 optimizer.zero_grad()
 
                 output, anchor_representation, positive_representation, negative_representation = self.forward(
-                    int_embedding, hop_embedding, time_embedding, len_pos, state)
+                    llama_model, args_llama, int_embedding, hop_embedding, time_embedding, len_pos, state)
 
                 output = output.squeeze()
 
+                # 计算对比学习损失
                 loss_c = self.criterion(anchor_representation, positive_representation, negative_representation)
 
                 loss_r = F.binary_cross_entropy_with_logits(output, y)
@@ -330,8 +331,52 @@ class AnomalyLLM(BertPreTrainedModel):
             loss_train /= len(self.data['snap_train']) - self.config.window_size + 1
             print('Epoch: {}, loss:{:.4f}, Time: {:.4f}s'.format(epoch + 1, loss_train, time.time() - t_epoch_begin))
 
+            self.eval()
+            preds = []
+            few_shot_test = []
+            for i in self.data['few_shot_test']:
+                few_shot_test.append(self.data['y'][i])
+            ii = 0
+            for snap in self.data['few_shot_test']:
+                int_embedding = self.int_embeddings[snap]
+                hop_embedding = self.hop_embeddings[snap]
+                time_embedding = self.time_embeddings[snap]
+                len_pos = 0
+                with torch.no_grad():
+                    output = self.forward(llama_model, args_llama, int_embedding, hop_embedding, time_embedding, len_pos, state)
+                    output = torch.sigmoid(output)
+                pred = output.squeeze().numpy()
+                preds.append(pred)
+                # wwww = self.data['y'][min(self.data['few_shot_test']):max(self.data['few_shot_test']) + 1]
+
+
+                auc = metrics.roc_auc_score(few_shot_test[ii], pred)
+                ii = ii+1
+                print("AUC: %.4f" % auc)
+            trues_full = np.hstack(few_shot_test)
+            preds_full = np.hstack(preds)
+            auc_full = metrics.roc_auc_score(trues_full, preds_full)
+            # cr = sm.classification_report(trues_full, (preds_full >= 0.5).astype(int))
+            # print('-------------------------------------------')
+            print('TOTAL AUC:{:.4f}'.format(auc_full))
+            save_path = 'pre'+str(epoch) + str(auc_full) + '_model.pth'
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': self.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                # 'loss': loss_train,
+            }, save_path)
+            print(save_path)
+
 
     def alignment(self, max_epoch):
+        output_model = "./backbone/vicuna-7b-v1.5"
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--model-name", type=str, default=output_model)
+        parser.add_argument("--conv-mode", type=str, default=None)
+        args_llama = parser.parse_args()
+        llama_model = DyGLlamaForCausalLM.from_pretrained(args_llama.model_name, torch_dtype=torch.float16, use_cache=True,
+                                                low_cpu_mem_usage=True, ).cuda()
 
         optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         raw_embeddings, wl_embeddings, self.hop_embeddings, self.int_embeddings, self.time_embeddings, self.batch_hop_dicts = self.generate_embedding(
@@ -344,7 +389,7 @@ class AnomalyLLM(BertPreTrainedModel):
         for epoch in range(max_epoch):
 
             t_epoch_begin = time.time()
-            checkpoint_file = r"./data/pre_train.pth"
+            checkpoint_file = r"./data/pre160.8281092012133469_model.pth"
             checkpoint = torch.load(checkpoint_file, map_location=torch.device('cpu'))
             self.load_state_dict(checkpoint['model_state_dict'], strict=False)
             print("Load model successfully")
@@ -353,7 +398,7 @@ class AnomalyLLM(BertPreTrainedModel):
                 time_embeddings_neg, batch_hop_dicts_neg = self.generate_embedding(negatives)
             self.train()
             loss_train = 0
-            for snap in self.data['snap_train']:
+            for snap in tqdm(self.data['snap_train']):
 
                 if wl_embeddings[snap] is None:
                     continue
@@ -377,7 +422,7 @@ class AnomalyLLM(BertPreTrainedModel):
                 optimizer.zero_grad()
 
                 output, anchor_representation, positive_representation, negative_representation = self.forward(
-                    int_embedding, hop_embedding, time_embedding, len_pos, state)
+                    llama_model, args_llama, int_embedding, hop_embedding, time_embedding, len_pos, state)
 
                 output = output.squeeze()
 
@@ -405,11 +450,13 @@ class AnomalyLLM(BertPreTrainedModel):
                 time_embedding = self.time_embeddings[snap]
                 len_pos = 0
                 with torch.no_grad():
-                    output = self.forward(int_embedding, hop_embedding, time_embedding, len_pos, state)
+                    output = self.forward(llama_model, args_llama, int_embedding, hop_embedding, time_embedding, len_pos, state)
                     output = torch.sigmoid(output)
                 pred = output.squeeze().numpy()
                 preds.append(pred)
                 # wwww = self.data['y'][min(self.data['few_shot_test']):max(self.data['few_shot_test']) + 1]
+
+
                 auc = metrics.roc_auc_score(few_shot_test[ii], pred)
                 ii = ii+1
                 print("AUC: %.4f" % auc)
@@ -419,7 +466,7 @@ class AnomalyLLM(BertPreTrainedModel):
             # cr = sm.classification_report(trues_full, (preds_full >= 0.5).astype(int))
             # print('-------------------------------------------')
             print('TOTAL AUC:{:.4f}'.format(auc_full))
-
+            save_path = str(epoch) + str(auc_full) + '_model.pth'
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': self.state_dict(),
@@ -430,6 +477,15 @@ class AnomalyLLM(BertPreTrainedModel):
 
     def evaluate(self, max_epoch):
 
+        output_model = "./backbone/vicuna-7b-v1.5"
+        state = "alignment"
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--model-name", type=str, default=output_model)
+        parser.add_argument("--conv-mode", type=str, default=None)
+        args_llama = parser.parse_args()
+        llama_model = DyGLlamaForCausalLM.from_pretrained(args_llama.model_name, torch_dtype=torch.float16, use_cache=True,
+                                                low_cpu_mem_usage=True, ).cuda()
+
         optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         raw_embeddings, wl_embeddings, self.hop_embeddings, self.int_embeddings, self.time_embeddings, self.batch_hop_dicts = self.generate_embedding(
             self.data['edges'])
@@ -437,42 +493,33 @@ class AnomalyLLM(BertPreTrainedModel):
 
         ns_function = self.negative_sampling
 
-        checkpoint_file = r"./data/Llama_uci_340.8466256048387097_model.pth"
+        checkpoint_file = r"./data/model.pth"
         checkpoint = torch.load(checkpoint_file, map_location=torch.device('cpu'))
         self.load_state_dict(checkpoint['model_state_dict'], strict=False)
         self.eval()
         preds = []
-        state = "evaluate"
         few_shot_test = []
         for i in self.data['few_shot_test']:
             few_shot_test.append(self.data['y'][i])
         ii = 0
-        for snap in tqdm(self.data['few_shot_test'], bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}"):
+        for snap in self.data['few_shot_test']:
             int_embedding = self.int_embeddings[snap]
             hop_embedding = self.hop_embeddings[snap]
             time_embedding = self.time_embeddings[snap]
             len_pos = 0
             with torch.no_grad():
-                output = self.forward(int_embedding, hop_embedding, time_embedding, len_pos, state)
+                output = self.forward(llama_model, args_llama, int_embedding, hop_embedding, time_embedding, len_pos, state)
                 output = torch.sigmoid(output)
             pred = output.squeeze().numpy()
             preds.append(pred)
+            # wwww = self.data['y'][min(self.data['few_shot_test']):max(self.data['few_shot_test']) + 1]
+
+
             auc = metrics.roc_auc_score(few_shot_test[ii], pred)
             ii = ii+1
             print("AUC: %.4f" % auc)
-        trues_full = np.hstack(few_shot_test)
-        preds_full = np.hstack(preds)
-        auc_full = metrics.roc_auc_score(trues_full, preds_full)
-        print('TOTAL AUC:{:.4f}'.format(auc_full))
 
 
-        save_path = 'Llama_uci_' + str(auc_full) + '_model.pth'
-        torch.save({
-            'model_state_dict': self.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            # 'loss': loss_train,
-        }, save_path)
-        print(save_path)
     def run(self, step):
         if step == "evaluate":
             self.evaluate(1)
@@ -481,5 +528,5 @@ class AnomalyLLM(BertPreTrainedModel):
             self.pretraining(self.max_epoch)
             return self.learning_record_dict
         if step == "alignment":
-            self.evaluate(1)
+            self.alignment(self.max_epoch)
             return self.learning_record_dict

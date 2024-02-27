@@ -27,16 +27,21 @@ To install all dependencies:
 ```
 pip install -r requirements.txt
 ```
+### Download Backbone
+Please download backbone model and place them under `./backbone`
 
-## Quick Demos
-1. Download backbone model and place them under `./backbone`
-2. Tune the model. For example, you can evaluate on UCI Message datasets by:
+### Download Data
+Due to the file size limit, we put the data on other sites. Please first download the data and put it in `data` folder. The data can be download at:  https://file.io/L9ROThL4ahQ7
+
+### Training & Evaluating
+To train AnomalyLLM, run the following command:
 ```bash
 python pre_training.py -dataset uci
 ```
 ```bash
 python alignment.py -dataset uci
 ```
+You can evaluate on UCI Message datasets by:
 ```bash
 python evaluate.py -dataset uci
 ```

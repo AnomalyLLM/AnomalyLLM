@@ -22,7 +22,7 @@ class TransposedLinear(nn.Module):
         self.linear = nn.Linear(in_features, out_features)
 
     def forward(self, x):
-\        return self.linear(x.t()).t()
+        return self.linear(x.t()).t()
 
 
 # 构建 Multi-Head Cross-Attention
@@ -37,7 +37,6 @@ class CrossAttentionModel(nn.Module):
 
 
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
 # edge_representation = torch.randn(10, 512)  
 #
 # # Text Prototypes
@@ -130,4 +129,3 @@ class CrossAttentionModel(nn.Module):
 #     "Accumulate", "Jetted", "Stockpile", "Gushed", "Hoard", "Spewed", "Store", "Erupted",
 #     "Keep", "Exploded", "Hold", "Blasted", "Possess", "Fired", "Own", "Shot",
 #     "Have", "Aimed"]
-

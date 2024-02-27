@@ -1,3 +1,5 @@
+import os
+
 from codes.AnomalyDatasetLoader import AnomalyDatasetLoader
 from codes.Component import MyConfig
 from codes.AnomalyLLM import AnomalyLLM
@@ -7,8 +9,7 @@ import torch
 import argparse
 import warnings
 warnings.filterwarnings("ignore")
-# os.environ['CUDA_VISIBLE_DEVICES'] = "1"
-import os
+# from pycm import *
 # from pycm import *
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, choices=['uci', 'digg', 'btc_alpha', 'btc_otc', 'BlogCatalog'], default='uci')
@@ -28,6 +29,7 @@ parser.add_argument('--weight_decay', type=float, default=5e-4)
 
 parser.add_argument('--seed', type=int, default=1)
 parser.add_argument('--print_feq', type=int, default=10)
+
 
 
 args = parser.parse_args()

@@ -176,7 +176,7 @@ class AnomalyDatasetLoader(dataset):
 
         snap_train = list(range(num_snap))[:train_size]
         snap_test = list(range(num_snap))[train_size:]
-        few_shot_test = [7, 11, 12]
+        few_shot_test = [10]
         idx = list(range(nb_nodes))
         index_id_map = {i:i for i in idx}
         idx = np.array(idx)

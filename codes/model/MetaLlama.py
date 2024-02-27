@@ -73,30 +73,9 @@ class DyGLlamaModel(LlamaModel):
                 if cur_new_input_embeds!=None:
                     new_input_embeds.append(cur_new_input_embeds)
                     cur_input += 1
-                # assert cur_edge_idx == len(edge_embedding)
-            # for i in inputs_embeds:
-            #     print(i)
+
             inputs_embeds = torch.stack(new_input_embeds, dim=0).to(torch.float16)
-            
 
-
-        # for i in inputs_embeds:
-        #     print(i)
-        # with open(r'shit.pkl', 'wb') as f:
-        #     pickle.dump(inputs_embeds, f)
-        # with open(r'shit.pkl', 'rb') as file:
-        #     your_data = pickle.load(file)
-        # print(len(your_data))
-        # print(len(your_data[0]))
-        # comparison = torch.eq(your_data, inputs_embeds)
-        # # 在第二个维度（332维度）上找到不相等的元素
-        # # comparison 的形状为 (1, 332, 4096)，使用 all() 方法在最后一个维度上进行比较
-        # # 如果所有 4096 个元素都相等，则返回 True，否则返回 False
-        # # 这将给我们一个形状为 (1, 332) 的张量
-        # not_equal = ~comparison.all(dim=2)
-        # # 获取不相等元素的索引
-        # index_of_not_equal = not_equal.nonzero(as_tuple=True)[1]
-        # print(index_of_not_equal)
 
         return super(DyGLlamaModel, self).forward(
             input_ids=None, attention_mask=attention_mask, past_key_values=past_key_values,

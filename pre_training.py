@@ -7,7 +7,6 @@ import torch
 import argparse
 import warnings
 warnings.filterwarnings("ignore")
-# os.environ['CUDA_VISIBLE_DEVICES'] = "1"
 import os
 # from pycm import *
 parser = argparse.ArgumentParser()
@@ -18,7 +17,7 @@ parser.add_argument('--train_per', type=float, default=0.5)
 parser.add_argument('--neighbor_num', type=int, default=18)
 parser.add_argument('--window_size', type=int, default=2)
 
-parser.add_argument('--embedding_dim', type=int, default=32)
+parser.add_argument('--embedding_dim', type=int, default=512)
 parser.add_argument('--num_hidden_layers', type=int, default=3)
 parser.add_argument('--num_attention_heads', type=int, default=4)
 
