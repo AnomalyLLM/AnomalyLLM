@@ -31,7 +31,7 @@ pip install -r requirements.txt
 Please download backbone model and place them under `./backbone`
 
 ### Download Data
-Due to the file size limit, we put the data on other sites. Please first download the data and put it in `data` folder. The data can be download at:  https://file.io/L9ROThL4ahQ7
+Due to the file size limit, we put the data on other sites. Please first download the data and put it in `data` folder. The data can be download at:  [here](https://drive.google.com/drive/folders/1fDomCx_ZCBVXyoP5cImD0mVCPiTBVgM0)
 
 ### Training & Evaluating
 To train AnomalyLLM, run the following command:
